@@ -2,6 +2,7 @@ import sys
 from _functools import reduce
 import copy
 import jieba
+import math
 
 
 class QueryIndex:
@@ -12,6 +13,7 @@ class QueryIndex:
         self.get_stopwords()
         self.indexFile = ""
         self.result = []
+        self.terms =[]
 
     def get_params(self):
         param = sys.argv
@@ -25,10 +27,7 @@ class QueryIndex:
     def query_type(self, q):
         if '"' in q:
             return 'PQ'
-        elif len(q.split()) > 1:
-            return 'FTQ'
-        else:
-            return 'OWQ'
+        return 'FTQ'
 
     def get_terms(self, query):
         """ processing query ,unsolved
@@ -46,41 +45,23 @@ class QueryIndex:
     def get_docs_from_postings(self, postings):
         return [doc.key() for doc in postings]
 
-    # one word queries
-    def one_word_query(self, q):
-        terms = self.get_terms(q)
-        # print(terms)
-        if len(terms) == 0:  # docs = [posting[0] for posting in self.index[terms]]
-            print()
-            return []
-        elif len(terms) > 1:
-            return self.free_text_queries(q)
-        if terms[0] not in self.index:
-            print()
-            return []
-        else:
-            docs = list(self.index[terms[0]].keys())
-            print(docs)
-            return docs
-
     # Free text queries
-    def free_text_queries(self, q):
-
-        terms = self.get_terms(q)
-        if len(terms) == 0:
-            print()
-            return []
+    def free_text_queries(self):
+        if len(self.terms) == 0:
+            self.result = []
+            return
         docs = set()
-        for term in terms:
+        for term in self.terms:
             dict_doc = self.index.get(term)
             if dict_doc is None:
-                term_docs = []
+                del term
             else:
                 term_docs = list(dict_doc.keys())
-            docs &= set(term_docs)
+                docs |= set(term_docs)
         docs = list(docs)
-        print(docs)
-        return docs
+        self.result = docs
+        # print("free-text :", docs)
+        return
 
     def intersect_postlists(self, lists):
         if len(lists) == 0:
@@ -89,17 +70,16 @@ class QueryIndex:
         return list(reduce(lambda x, y: set(x) & set(y), lists))
 
     # Phrase Query
-    def phrase_query(self, q):
-        terms = self.get_terms(q)
-        if len(terms) == 0:
+    def phrase_query(self):
+        if len(self.terms) == 0:
             print()
-        elif len(terms) == 1:
-            self.one_word_query(terms)
+        elif len(self.terms) == 1:
+            self.free_text_queries(self.terms)
 
-        for term in terms:
+        for term in self.terms:
             if term not in self.index:
                 return []
-        postings = self.get_postings(terms)
+        postings = self.get_postings(self.terms)
         docs = self.get_docs_from_postings(postings)
         docs = self.intersect_postlists(docs)
 
@@ -124,17 +104,42 @@ class QueryIndex:
         print(result)
         return result
 
+    def log10(self,num):
+        return math.log(num)/math.log(10)
+
+    def cmpt_tf_idf(self):
+        tf_idf_dict = {}
+        N = 100000.0  # doc set number
+        for term in self.terms:
+            if term not in self.index:
+                idf = self.log10(N/(N-1))
+            else:
+                idf = self.log10(N/len(self.index[term]))
+            for doc in self.result:
+                tf_idf = (1+self.log10(len(self.index[term][doc])))*idf
+                if doc in tf_idf_dict:
+                    tf_idf_dict[doc] += tf_idf
+                else:
+                    tf_idf_dict[doc] = tf_idf
+        return tf_idf_dict
+
     def query_index(self, q):
         # q string
         if len(q) == 0:
+            print([])
             return []
         qt = self.query_type(q)
-        if qt == 'OWQ':
-            self.one_word_query(q)
-        elif qt == 'FTQ':
-            self.free_text_queries(q)
+        self.terms = self.get_terms(q)
+        if qt == 'FTQ':
+            self.free_text_queries()
         elif qt == 'PQ':
-            self.phrase_query(q)
+            self.phrase_query()
+
+        tf_idf = self.cmpt_tf_idf()
+
+        sorted(self.result, key=lambda doc: tf_idf[doc])
+        # cmp=lambda x, y: operator.ge(tf_idf[x], tf_idf[y]))
+        print(self.result)
 
     def read_index_from_disk(self):
 
